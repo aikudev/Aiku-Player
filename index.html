@@ -135,10 +135,15 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
       <button class="btn">Play</button>
     </form>
     <div class="local-row">
-      <input id="localFile" type="file" accept="video/*,.mkv,.mk3d,.avi,.flv,.wmv,.asf,.ts,.mts,.m2ts,.m2v,.mpg,.mpeg,.mpe,.vob,.3gp,.3g2,.ogv,.ogm,.divx,.rm,.rmvb,.m4v,.mov,.webm,.mp4,.mxf,.m2p" hidden>
-      <button class="btn ghost" id="localFileBtn" type="button">Select local video</button>
-      <span class="local-hint">Plays directly from this device — nothing is uploaded.</span>
+      <input id="localFile" type="file" accept="video/*,.mkv,.mk3d,.avi,.flv,.wmv,.asf,.ts,.mts,.m2ts,.m2v,.mpg,.mpeg,.mpe,.vob,.3gp,.3g2,.ogv,.ogm,.divx,.rm,.rmvb,.m4v,.mov,.webm,.mp4,.mxf,.m2p,.m3u8,.mpd,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wav,.wma,.ape,.alac" hidden>
+      <button class="btn ghost" id="localFileBtn" type="button">Select video / audio / playlist</button>
+      <span class="local-hint">Local playback stays on this device. Unsupported codecs may still need conversion.</span>
     </div>
+    <div class="local-row" style="margin-top:14px">
+      <input id="playlistUrl" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="Paste .m3u8 playlist URL">
+      <button class="btn ghost" id="playlistLoad" type="button">Load playlist</button>
+    </div>
+    <div id="playlistChoices" class="hidden" style="margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:12px"></div>
     <div id="openErr" class="err" role="alert"></div>
     <div class="chips"><b>MP4</b><b>WebM</b><b>HLS</b><b>Direct URLs</b><b>Google Drive*</b><b>Dropbox*</b></div>
     <p class="note">*MKV and some codecs only play if your browser supports them. The link must be a direct file link, not a web page.</p>
@@ -165,12 +170,12 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
         <div id="subsList" class="menu-list"></div>
         <div class="panel-note">Supports WebVTT, SubRip (.srt), and basic ASS/SSA conversion. HLS subtitles are detected automatically.</div>
         <input id="subUrl" class="panel-input" placeholder="Subtitle .vtt URL">
-        <div class="panel-actions"><input id="subFile" type="file" accept=".vtt,.srt,.ass,.ssa,text/vtt,application/x-subrip" hidden><button class="mini-btn" id="subFileBtn">Add subtitle file</button><button class="mini-btn" id="subUrlBtn">Add URL</button></div>
+        <div class="panel-actions"><input id="subFile" type="file" accept=".vtt,.srt,.ass,.ssa,.txt,.sub,text/vtt,application/x-subrip" hidden><button class="mini-btn" id="subFileBtn">Add subtitle file</button><button class="mini-btn" id="subUrlBtn">Add URL</button></div>
       </div>
       <div class="audio-panel hidden" id="audioPanel">
         <div class="panel-title">Audio / language</div>
         <div id="audioList" class="menu-list"></div>
-        <div class="panel-note">Alternate audio tracks are available when the stream provides them (for example HLS).</div>
+        <div class="panel-note">Alternate audio tracks are available when the stream provides them (for example HLS). You can also open a standalone audio URL or local audio file from the start screen.</div>
       </div>
       <div class="chapters-panel hidden" id="chaptersPanel">
         <div class="panel-title">Chapters</div>
@@ -231,7 +236,7 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
     mute:'<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="m17 9 5 6M22 9l-5 6"/></svg>'
   };
   const fmt = s => { if (!Number.isFinite(s) || s < 0) return '0:00'; s=Math.floor(s); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); };
-  let ffmpeg=null, ffmpegLoaded=false, converting=false;
+  let ffmpeg=null, ffmpegLoaded=false, converting=false, currentLocalFileName='';
   let toastTimer, hls=null, source='', key='', idleTimer, lastTap=0, tapTimer=null, dragging=false, proxyTried=false, hlsProxy=false, localPlayback=false, localObjectUrl='', zoom=1, fitMode='fit', panX=0, panY=0, panStart=null, pinchStart=null, pinchZoomStart=1, suppressClick=false, qualityLevels=[], subtitleTracks=[], activeSubtitle=-1, audioTracks=[], locked=false, chapterCues=[];
 
   function toast(t){ const e=$('toast'); e.textContent=t; e.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>e.classList.remove('show'),2200); }
@@ -251,7 +256,8 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
   function setIcons(){ $('pp').innerHTML=v.paused?ICO.play:ICO.pause; $('mute').innerHTML=(v.muted||v.volume===0)?ICO.mute:ICO.vol; }
   function setLoading(on){ P.classList.toggle('loading',on); }
   function canTranscodeSource(u){
-    return /\.(mkv|mk3d|avi|flv|wmv|asf|ts|mts|m2ts|m2v|mpg|mpeg|mpe|vob|3gp|3g2|ogv)(?:$|[?#])/i.test(u||'');
+    const localName=currentLocalFileName||document.getElementById('localFile')?.files?.[0]?.name||'';
+    return /\.(mkv|mk3d|avi|flv|wmv|asf|ts|mts|m2ts|m2v|mpg|mpeg|mpe|vob|3gp|3g2|ogv|ogm|divx|rm|rmvb|mxf|mp3|m4a|aac|flac|ogg|opus|wav|wma|ape|alac|ac3|dts)(?:$|[?#])/i.test(u||'') || /\.(mkv|mk3d|avi|flv|wmv|asf|ts|mts|m2ts|m2v|mpg|mpeg|mpe|vob|3gp|3g2|ogv|ogm|divx|rm|rmvb|mxf|mp3|m4a|aac|flac|ogg|opus|wav|wma|ape|alac|ac3|dts)$/i.test(localName);
   }
   function fail(title,msg,details=true){
     setLoading(false); const f=$('fail'); f.classList.remove('hidden');
@@ -373,12 +379,12 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
     text=subtitleToVtt(text,label);const blob=new Blob([text],{type:'text/vtt'}),url=URL.createObjectURL(blob);const track=document.createElement('track');track.kind='subtitles';track.label=label||'Subtitles';track.srclang=(label||'en').slice(0,2).toLowerCase();track.src=url;track.default=false;v.appendChild(track);
     const list=Array.from(v.textTracks),tt=list[list.length-1];subtitleTracks.push({label:track.label,track:tt});tt.addEventListener('cuechange',()=>renderNativeCue(tt));refreshSubtitleTracks();setSubtitle(subtitleTracks.length-1);
   }
-  async function addVttUrl(url,label){if(!/^https?:/i.test(url)){toast('Enter a valid subtitle URL');return;}try{const r=await fetch(url);if(!r.ok)throw new Error('HTTP '+r.status);addVttText(await r.text(),label||decodeURIComponent(new URL(url).pathname.split('/').pop()||'Subtitles'));}catch(e){toast('Subtitle URL failed: check CORS and URL');}}
+  async function addVttUrl(url,label){if(!/^https?:/i.test(url)){toast('Enter a valid subtitle URL');return;}try{let r;try{r=await fetch(url);}catch{}if(!r||!r.ok)r=await fetch(proxyUrl(url));if(!r.ok)throw new Error('HTTP '+r.status);const text=await r.text();addVttText(text,label||decodeURIComponent(new URL(url).pathname.split('/').pop()||'Subtitles'));}catch(e){toast('Subtitle URL failed: URL blocked, invalid, or unavailable');}}
   function renderNativeCue(tt){if(activeSubtitle<0||tt.mode!=='showing'){if(activeSubtitle<0)$('subtitleBadge').textContent='';return;}const cues=tt.activeCues;if(!cues||!cues.length){$('subtitleBadge').textContent='';return;}$('subtitleBadge').textContent=Array.from(cues).map(c=>c.text.replace(/<[^>]+>/g,'')).join(' ');}
   function refreshChapters(){const box=$('chaptersList');box.innerHTML='';chapterCues=[];for(const tt of Array.from(v.textTracks)){if(tt.kind==='chapters'){chapterCues=Array.from(tt.cues||[]);break;}}if(!chapterCues.length){$('chaptersNote').textContent='No chapter track detected.';return;}$('chaptersNote').textContent='';chapterCues.forEach((c,i)=>{const b=document.createElement('button');b.className='menu-choice';b.textContent=c.text||('Chapter '+(i+1));b.onclick=()=>{v.currentTime=c.start;v.play().catch(()=>{});closePanels();};box.appendChild(b);});}
   function togglePanel(id){const hidden=$(id).classList.contains('hidden');closePanels(hidden?id:null);$(id).classList.toggle('hidden',!hidden);wake();}
 
-  const UNSUPPORTED_EXT=/\.(mkv|mkb|avi|flv|wmv|mpeg|mpg|mts|m2ts|ts|vob|3gp|ogv|ogm|divx|rm|rmvb)(?:$|[?#])/i;
+  const UNSUPPORTED_EXT=/\.(mkv|mkb|avi|flv|wmv|mpeg|mpg|mts|m2ts|ts|vob|3gp|ogv|ogm|divx|rm|rmvb|mxf|mp3|m4a|aac|flac|ogg|opus|wav|wma|ape|alac|ac3|dts)(?:$|[?#])/i;
   function likelyUnsupported(u){ return UNSUPPORTED_EXT.test(u) || /video\/(x-matroska|x-msvideo|x-flv|x-ms-wmv)/i.test(v.getAttribute('type')||''); }
   async function ensureFFmpeg(){
     if(ffmpegLoaded) return ffmpeg;
@@ -403,21 +409,65 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
       if(!response.ok) throw new Error('Could not download the source through the player proxy ('+response.status+').');
       const data=new Uint8Array(await response.arrayBuffer());
       if(data.byteLength>1200*1024*1024) throw new Error('This file is over 1.2 GB; browser conversion is not practical.');
-      const ext=localPlayback?((document.getElementById('localFile')?.files?.[0]?.name||'input.mkv').match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase()||'mkv'):inputExt(source), input='input.'+ext, output='aiku-output.mp4';
+      const ext=localPlayback?((currentLocalFileName||document.getElementById('localFile')?.files?.[0]?.name||'input.mkv').match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase()||'mkv'):inputExt(source), input='input.'+ext;
+      const audioOnly=/\.(mp3|m4a|aac|flac|ogg|opus|wav|wma|ape|alac|ac3|dts)(?:$|[?#])/i.test(source) || /\.(mp3|m4a|aac|flac|ogg|opus|wav|wma|ape|alac|ac3|dts)$/i.test(currentLocalFileName||document.getElementById('localFile')?.files?.[0]?.name||'');
+      const output=audioOnly?'aiku-output.mp3':'aiku-output.mp4';
       await engine.writeFile(input,data);
       $('convertProgress').textContent='0% — transcoding…';
-      await engine.exec(['-i',input,'-map','0:v:0?','-map','0:a:0?','-c:v','libx264','-preset','ultrafast','-crf','23','-c:a','aac','-b:a','128k','-movflags','+faststart',output]);
+      if(audioOnly) await engine.exec(['-i',input,'-vn','-map','0:a:0','-c:a','libmp3lame','-b:a','192k',output]);
+      else await engine.exec(['-i',input,'-map','0:v:0?','-map','0:a:0?','-c:v','libx264','-preset','ultrafast','-crf','23','-c:a','aac','-b:a','128k','-movflags','+faststart',output]);
       const out=await engine.readFile(output);
-      const blob=new Blob([out.buffer],{type:'video/mp4'});
+      const blob=new Blob([out.buffer],{type:audioOnly?'audio/mpeg':'video/mp4'});
       const url=URL.createObjectURL(blob);
       destroyHls(); v.pause(); v.removeAttribute('src'); v.src=url; v.load(); source=url; key='aiku-converted:'+Date.now();
-      failBox.classList.add('hidden'); toast('Converted to MP4 — playback ready');
+      failBox.classList.add('hidden'); toast(audioOnly?'Converted audio — playback ready':'Converted to MP4 — playback ready');
       try{await engine.deleteFile(input);await engine.deleteFile(output);}catch{}
     }catch(e){ failBox.classList.remove('hidden'); failBox.innerHTML='<b>Conversion failed</b><div>'+escapeHtml(e?.message||String(e))+'</div><div class="panel-note">MKV/AVI support depends on the codecs inside the file. For very large files, use a server-side FFmpeg conversion instead.</div>'; }
     finally{converting=false;setLoading(false);}
   }
   window.__aikuConvert=convertUnsupported;
 
+  function playlistProxyUrl(u){ return '/api/proxy?url='+encodeURIComponent(u); }
+  function parseMasterPlaylist(text, baseUrl){
+    const lines=String(text||'').replace(/^\uFEFF/,'').split(/\r?\n/).map(x=>x.trim());
+    const choices=[];
+    for(let i=0;i<lines.length;i++){
+      if(!/^#EXT-X-STREAM-INF:/i.test(lines[i])) continue;
+      let uri=''; for(let j=i+1;j<lines.length;j++){ if(lines[j] && !lines[j].startsWith('#')){uri=lines[j];break;} }
+      if(!uri) continue;
+      const attrs={}; (lines[i].split(':').slice(1).join(':').match(/(?:[^,"]|"[^"]*")+/g)||[]).forEach(part=>{const k=part.split('=')[0]?.trim(), val=part.slice(part.indexOf('=')+1).trim().replace(/^"|"$/g,'');if(k)attrs[k]=val;});
+      let url=uri; try{url=new URL(uri,baseUrl).toString();}catch{}
+      const res=attrs.RESOLUTION||''; const bw=Number(attrs['AVERAGE-BANDWIDTH']||attrs.BANDWIDTH||0); const height=Number((res.match(/x(\d+)/i)||[])[1]||0);
+      choices.push({url,label:[height?height+'p':'Quality '+(choices.length+1),bw?Math.round(bw/1000)+' kbps':'',attrs.CODECS||''].filter(Boolean).join(' · '),height,bw});
+    }
+    return choices;
+  }
+  async function loadPlaylist(raw, fileText=null, fileName='playlist.m3u8'){
+    const panel=$('playlistChoices'); panel.classList.remove('hidden'); panel.innerHTML='<div class="panel-note">Reading playlist…</div>';
+    let text='', base='';
+    try{
+      if(fileText!==null){text=fileText;base=$('playlistUrl').value.trim();}
+      else {const u=normalize(raw);if(!u)throw new Error('Enter a valid HTTP(S) playlist URL.');base=u;let r=await fetch(u);if(!r.ok)throw new Error('Playlist request failed ('+r.status+'). Retrying through proxy…');text=await r.text();}
+      if(!/^\s*#EXTM3U/m.test(text)) throw new Error('This file does not look like an M3U8 playlist.');
+      let choices=parseMasterPlaylist(text,base);
+      if(!choices.length){
+        if(fileText!==null && !base){
+          const rel=text.split(/\r?\n/).some(x=>x.trim()&&!x.trim().startsWith('#')&&!/^https?:\/\//i.test(x.trim()));
+          if(rel) throw new Error('This is a media playlist with relative segment paths. Enter the original playlist URL above so segment paths can be resolved.');
+        }
+        const u=base||'';
+        if(!u) throw new Error('No selectable variants found. This may be a single-quality playlist. Enter its original URL to play it.');
+        panel.innerHTML='<div class="panel-note">Single stream playlist detected.</div><button class="btn" id="playlistPlaySingle" type="button">Play playlist</button>';
+        $('playlistPlaySingle').onclick=()=>{panel.classList.add('hidden');location.search='?url='+encodeURIComponent(u);};return;
+      }
+      panel.innerHTML='<b style="display:block;margin-bottom:8px">Choose stream quality ('+choices.length+')</b><div id="playlistChoiceList" style="display:grid;gap:7px"></div>';
+      const list=$('playlistChoiceList');
+      choices.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='btn ghost';b.style.justifyContent='space-between';b.style.width='100%';b.textContent=c.label;b.onclick=()=>{panel.classList.add('hidden');if(!c.url) return toast('Playlist variant URL is invalid');location.search='?url='+encodeURIComponent(c.url);};list.appendChild(b);});
+    }catch(e){
+      if(fileText===null && raw){try{const u=normalize(raw);const r=await fetch(playlistProxyUrl(u));if(!r.ok)throw new Error('HTTP '+r.status);text=await r.text();if(!/^\s*#EXTM3U/m.test(text))throw new Error('URL did not return an M3U8 playlist');const choices=parseMasterPlaylist(text,u);if(choices.length){panel.innerHTML='<b style="display:block;margin-bottom:8px">Choose stream quality ('+choices.length+')</b><div id="playlistChoiceList" style="display:grid;gap:7px"></div>';const list=$('playlistChoiceList');choices.forEach(c=>{const b=document.createElement('button');b.type='button';b.className='btn ghost';b.style.width='100%';b.textContent=c.label;b.onclick=()=>location.search='?url='+encodeURIComponent(c.url);list.appendChild(b);});return;}panel.innerHTML='<div class="err">'+escapeHtml(e.message||'Could not read playlist')+'</div><button class="btn" id="playlistDirectPlay">Try playing playlist</button>'; $('playlistDirectPlay').onclick=()=>location.search='?url='+encodeURIComponent(u);return;}catch(proxyError){}}
+      panel.innerHTML='<div class="err">'+escapeHtml(e.message||'Could not load playlist')+'</div>';
+    }
+  }
   function loadSource(u){
     destroyHls(); v.pause(); v.removeAttribute('src'); v.load(); setLoading(true); $('fail').classList.add('hidden');
     source=u; key='aiku-pos:'+u; proxyTried=false; hlsProxy=false; showSource();
@@ -448,6 +498,7 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
     try{ destroyHls(); }catch{}
     if(localObjectUrl){ try{URL.revokeObjectURL(localObjectUrl);}catch{} }
     localObjectUrl=URL.createObjectURL(file);
+    currentLocalFileName=file.name||'';
     localPlayback=true;
     proxyTried=true;
     hlsProxy=false;
@@ -515,11 +566,14 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
   stage.addEventListener('touchmove',e=>{if(e.touches.length===2&&pinchStart){setZoomFromPinch(pinchZoomStart*(distance(e.touches[0],e.touches[1])/pinchStart));e.preventDefault();}},{passive:false});
   stage.addEventListener('touchend',e=>{if(e.touches.length<2)pinchStart=null;});
 
+  $('localFileBtn').onclick=()=>$('localFile').click();
+  $('localFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return; if(/\.m3u8$/i.test(f.name)){await loadPlaylist('',await f.text(),f.name);}else{startLocalFile(f);}e.target.value='';};
+  $('playlistLoad').onclick=()=>{const u=$('playlistUrl').value.trim();if(!u){toast('Paste an M3U8 URL first');return;}loadPlaylist(u);};
   $('subsBtn').onclick=()=>togglePanel('subsPanel');
   $('audioBtn').onclick=()=>{refreshAudioTracks();togglePanel('audioPanel');};
   $('chaptersBtn').onclick=()=>{refreshChapters();togglePanel('chaptersPanel');};
   $('subFileBtn').onclick=()=>$('subFile').click();
-  $('subFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;addVttText(await f.text(),f.name.replace(/\.(vtt|srt|ass|ssa)$/i,'')||'Subtitles');e.target.value='';};
+  $('subFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;addVttText(await f.text(),f.name.replace(/\.(vtt|srt|ass|ssa|txt|sub)$/i,'')||'Subtitles');e.target.value='';};
   $('subUrlBtn').onclick=()=>{const u=$('subUrl').value.trim();if(u){addVttUrl(u);$('subUrl').value='';}};
   $('lockBtn').onclick=()=>{locked=!locked;P.classList.toggle('locked',locked);toast(locked?'Controls locked':'Controls unlocked');};
   $('lock-indicator')?.addEventListener('click',()=>{locked=false;P.classList.remove('locked');});
@@ -548,7 +602,6 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
   });
   v.addEventListener('ended',()=>{try{localStorage.removeItem(key);}catch{}P.classList.remove('playing');setIcons();});
   v.addEventListener('loadedmetadata',()=>{try{const t=Number(localStorage.getItem(key));if(t>5&&Number.isFinite(v.duration)&&t<v.duration-10){v.currentTime=t;toast('Resumed at '+fmt(t));}}catch{} refreshChapters();refreshSubtitleTracks();refreshAudioTracks();paint();});
-  v.addEventListener('error',()=>{if(v.error && !localPlayback && !proxyTried && source && !/\.m3u8(?:$|[?#])/i.test(source)){tryProxy();return;} if(v.error && !converting){const codes={1:'Playback was interrupted.',2:'Network error while loading media. Check the URL, CORS, or server availability.',3:'This browser cannot decode this video/audio codec. Try Convert unsupported format.',4:'Unsupported media type or invalid media URL.'}; fail('Media playback error',codes[v.error.code]||'The media could not be played.');}});
   v.addEventListener('canplay',()=>{setLoading(false);$('fail').classList.add('hidden');});
   setInterval(()=>{if(source&&!v.paused&&v.currentTime>5){try{localStorage.setItem(key,String(Math.floor(v.currentTime)));}catch{}}},3000);
 

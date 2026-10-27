@@ -1,30 +1,31 @@
-# Aiku Player v5 — Local Playback Edition
+# Aiku Player — Test Build 6
 
-Netflix-style browser video player for direct media URLs.
+A mobile-friendly browser player for direct HTTP(S) media URLs and local files.
 
-## Features
-- MP4/WebM/native browser playback
-- Local video file playback with device file picker (no upload)
-- Local MKV/AVI/3GP/etc. conversion fallback through FFmpeg/WASM
-- HLS `.m3u8` via hls.js with quality and alternate audio tracks
-- Vercel streaming proxy fallback with Range requests
-- Play/pause, seek, 10s skip, volume, speed, fullscreen, PiP
-- Fit / Fill / 100–300% zoom, pinch zoom and pan
-- Subtitle/caption menu: HLS subtitle tracks, remote subtitle URL, local `.vtt` / `.srt` files and basic `.ass` / `.ssa` conversion
-- Audio/language selector for HLS alternate audio tracks and native browser-exposed audio tracks
-- Chapters menu when a chapters text track is supplied
-- Cinema mode, screen lock, resume position, keyboard shortcuts
-- Mobile double-tap seeking and center fullscreen gesture
+## Included
+- Direct browser playback for supported MP4/WebM/MOV and other browser-supported codecs.
+- HLS `.m3u8` playback through hls.js, including HLS alternate audio and subtitle tracks when the playlist exposes them.
+- Local file picker, including MKV, AVI, 3GP, TS, FLAC, MP3 and other common media extensions.
+- Optional FFmpeg/WASM conversion fallback for some unsupported local or remote formats.
+- External VTT/SRT/ASS/SSA subtitle loading, subtitle URL query parameters, chapters where exposed, fit/fill/zoom, pinch zoom, speed, seeking, PiP, fullscreen, resume position and mobile gestures.
+- Vercel `/api/proxy` fallback with byte-range forwarding, CORS, HLS playlist URI resolution, redirect checks and basic private-host blocking.
 
-## Deploy
-Deploy the `Aiku-Player` directory to Vercel as a static site. The `/api/proxy` function is used automatically when a direct media request fails.
+## Deploy to Vercel
+1. Import this folder/repository into Vercel.
+2. Keep `index.html`, `app.js`, `api/proxy.js`, `vercel.json`, and `manifest.webmanifest` at the project root structure shown here.
+3. Deploy with no build command required for the static frontend and Edge Function.
 
-## Subtitle URL
-You can preload a WebVTT subtitle with:
+## Test a media URL
+Open the deployed site, paste a direct media URL, then use the Audio/Subtitles menus if tracks are exposed. You can also load an external subtitle with:
+
 `?url=VIDEO_URL&sub=SUBTITLE_VTT_URL&subLabel=English`
 
-Remote subtitle files must allow browser access (CORS), or the browser will block them.
+The video and subtitle host must allow access or be reachable through the proxy. Signed URLs may expire; protected streams requiring cookies, login, DRM, or special request headers may not work.
 
-## Format compatibility notes
+## Important compatibility limits
+A browser player cannot promise to play every format. HTML video does not reliably expose embedded audio/subtitle tracks inside arbitrary MKV/MP4/AVI files. HLS alternate tracks are supported when declared by the playlist. For embedded tracks in arbitrary containers, a server-side FFmpeg/FFprobe media service is required to inspect and remux/transcode the source; this static Vercel build does not include that service.
 
-No browser player can guarantee every video container and codec. Playback depends on the browser/device decoder and the codecs inside each file. The local FFmpeg/WASM fallback can transcode many unsupported files to H.264/AAC MP4, but it requires network access to load FFmpeg, uses substantial memory, and may not work for every codec or very large file. Alternate audio tracks are selectable only when the stream or browser exposes them. ASS/SSA subtitle conversion preserves text and timing but not advanced styling, positioning, or effects. Remote subtitle URLs must permit browser CORS access.
+FFmpeg/WASM runs in the browser, downloads the media into memory, and can be slow or fail on large files and unsupported codecs. For large files, use a server-side media worker. This project does not support native RTSP/RTMP playback and does not bypass DRM, authentication, expired tokens, or provider restrictions.
+
+## Proxy safety note
+The proxy accepts public HTTP(S) URLs and checks redirect targets to reduce private-network access risks. For a production public service, further restrict allowed upstream hosts or add rate limiting/authentication to prevent abuse.
