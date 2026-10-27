@@ -135,7 +135,7 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
       <button class="btn">Play</button>
     </form>
     <div class="local-row">
-      <input id="localFile" type="file" accept="video/*,.mkv,.mk3d,.avi,.flv,.wmv,.asf,.ts,.mts,.m2ts,.m2v,.mpg,.mpeg,.mpe,.vob,.3gp,.3g2,.ogv" hidden>
+      <input id="localFile" type="file" accept="video/*,.mkv,.mk3d,.avi,.flv,.wmv,.asf,.ts,.mts,.m2ts,.m2v,.mpg,.mpeg,.mpe,.vob,.3gp,.3g2,.ogv,.ogm,.divx,.rm,.rmvb,.m4v,.mov,.webm,.mp4,.mxf,.m2p" hidden>
       <button class="btn ghost" id="localFileBtn" type="button">Select local video</button>
       <span class="local-hint">Plays directly from this device — nothing is uploaded.</span>
     </div>
@@ -163,9 +163,9 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
       <div class="subs-panel hidden" id="subsPanel">
         <div class="panel-title">Subtitles & captions</div>
         <div id="subsList" class="menu-list"></div>
-        <div class="panel-note">Supports WebVTT (.vtt). HLS subtitles are detected automatically.</div>
+        <div class="panel-note">Supports WebVTT, SubRip (.srt), and basic ASS/SSA conversion. HLS subtitles are detected automatically.</div>
         <input id="subUrl" class="panel-input" placeholder="Subtitle .vtt URL">
-        <div class="panel-actions"><input id="subFile" type="file" accept=".vtt,text/vtt" hidden><button class="mini-btn" id="subFileBtn">Add VTT file</button><button class="mini-btn" id="subUrlBtn">Add URL</button></div>
+        <div class="panel-actions"><input id="subFile" type="file" accept=".vtt,.srt,.ass,.ssa,text/vtt,application/x-subrip" hidden><button class="mini-btn" id="subFileBtn">Add subtitle file</button><button class="mini-btn" id="subUrlBtn">Add URL</button></div>
       </div>
       <div class="audio-panel hidden" id="audioPanel">
         <div class="panel-title">Audio / language</div>
@@ -344,10 +344,10 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
   }
   function closePanels(except){['zoomPanel','settingsPanel','subsPanel','audioPanel','chaptersPanel'].forEach(id=>{if(id!==except)$(id).classList.add('hidden');});}
   function refreshAudioTracks(){
-    const box=$('audioList'); box.innerHTML='';
-    if(!hls || !hls.audioTracks?.length){ box.innerHTML='<div class="panel-note">No alternate audio languages were provided by this video.</div>'; return; }
-    audioTracks=hls.audioTracks;
-    audioTracks.forEach((a,i)=>{const b=document.createElement('button');b.className='menu-choice'+(i===hls.audioTrack?' active':'');b.innerHTML=escapeHtml(a.name||a.lang||('Track '+(i+1)))+' <small>'+escapeHtml(a.lang||'')+'</small>';b.onclick=()=>{hls.audioTrack=i;refreshAudioTracks();toast('Audio: '+(a.name||a.lang||('Track '+(i+1))));};box.appendChild(b);});
+    const box=$('audioList'); box.innerHTML=''; let count=0;
+    if(hls && hls.audioTracks?.length){ audioTracks=hls.audioTracks; audioTracks.forEach((a,i)=>{const b=document.createElement('button');b.className='menu-choice'+(i===hls.audioTrack?' active':'');b.innerHTML=escapeHtml(a.name||a.lang||('Track '+(i+1)))+' <small>'+escapeHtml(a.lang||'')+'</small>';b.onclick=()=>{hls.audioTrack=i;refreshAudioTracks();toast('Audio: '+(a.name||a.lang||('Track '+(i+1))));};box.appendChild(b);count++;}); }
+    try { const tracks=v.audioTracks; if(tracks && tracks.length){ Array.from(tracks).forEach((a,i)=>{const b=document.createElement('button');b.className='menu-choice'+(a.enabled?' active':'');b.textContent=(a.label||a.language||('Audio track '+(i+1)))+(a.language?' · '+a.language:'');b.onclick=()=>{Array.from(tracks).forEach((t,n)=>t.enabled=n===i);refreshAudioTracks();toast('Audio: '+(a.label||a.language||('Track '+(i+1))));};box.appendChild(b);count++;}); } } catch(e) { /* not implemented by all browsers */ }
+    if(!count) box.innerHTML='<div class="panel-note">This file exposes only its default audio track, or this browser does not expose alternate tracks.</div>';
   }
   function refreshSubtitleTracks(){
     const box=$('subsList'); box.innerHTML='';
@@ -359,11 +359,21 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
     if(i===-1){activeSubtitle=-1;subtitleTracks.forEach(t=>t.track.mode='disabled');if(hls){hls.subtitleDisplay=false;hls.subtitleTrack=-1;}$('subtitleBadge').textContent='';refreshSubtitleTracks();return;}
     activeSubtitle=i;subtitleTracks.forEach((t,n)=>t.track.mode=n===i?'showing':'disabled');if(hls){hls.subtitleDisplay=false;hls.subtitleTrack=-1;}refreshSubtitleTracks();toast('Subtitles: '+subtitleTracks[i].label);
   }
-  function addVttText(text,label){
-    const blob=new Blob([text],{type:'text/vtt'}), url=URL.createObjectURL(blob); const track=document.createElement('track');track.kind='subtitles';track.label=label||'Subtitles';track.srclang=(label||'en').slice(0,2).toLowerCase();track.src=url;track.default=false;v.appendChild(track);
-    const list=Array.from(v.textTracks);const tt=list[list.length-1];subtitleTracks.push({label:track.label,track:tt});tt.addEventListener('cuechange',()=>renderNativeCue(tt));refreshSubtitleTracks();setSubtitle(subtitleTracks.length-1);
+  function subtitleToVtt(text,filename=''){
+    const ext=(filename.split('.').pop()||'').toLowerCase(); if(/^\s*WEBVTT/i.test(text))return text;
+    if(ext==='srt'||/-->/.test(text))return 'WEBVTT\n\n'+text.replace(/\r/g,'').replace(/^(\d{2}:\d{2}:\d{2}),(\d{3})/gm,'$1.$2').replace(/^\d+\s*$/gm,'');
+    if(ext==='ass'||ext==='ssa'){
+      const out=[];let events=false,format=['Layer','Start','End','Style','Name','MarginL','MarginR','MarginV','Effect','Text'];
+      const stamp=x=>{const m=(x||'').trim().match(/^(\d+):(\d{2}):(\d{2})[.](\d+)/);return m?`${String(+m[1]).padStart(2,'0')}:${m[2]}:${m[3]}.${(m[4]+'00').slice(0,3)}`:null;};
+      for(const line of text.split(/\r?\n/)){if(/^\[Events\]/i.test(line)){events=true;continue;}if(/^\[/.test(line)){events=false;continue;}if(!events)continue;if(/^Format:/i.test(line)){format=line.slice(line.indexOf(':')+1).split(',').map(x=>x.trim());continue;}if(!/^Dialogue:/i.test(line))continue;const cols=line.slice(line.indexOf(':')+1).trim().split(',');if(cols.length<format.length)continue;const row={};format.forEach((k,i)=>row[k.toLowerCase()]=i===format.length-1?cols.slice(i).join(','):cols[i]);const a=stamp(row.start),b=stamp(row.end),body=(row.text||'').replace(/\{[^}]*\}/g,'').replace(/\N/g,'\n').replace(/\h/g,' ');if(a&&b&&body.trim())out.push(`${a} --> ${b}\n${body}`);}
+      return 'WEBVTT\n\n'+out.join('\n\n');
+    } return 'WEBVTT\n\n'+text;
   }
-  function addVttUrl(url,label){if(!/^https?:/i.test(url)){toast('Enter a valid subtitle URL');return;}const track=document.createElement('track');track.kind='subtitles';track.label=label||'Subtitles';track.srclang='en';track.src=url;v.appendChild(track);const tt=Array.from(v.textTracks).at(-1);subtitleTracks.push({label:track.label,track:tt});tt.addEventListener('cuechange',()=>renderNativeCue(tt));refreshSubtitleTracks();setSubtitle(subtitleTracks.length-1);}
+  function addVttText(text,label){
+    text=subtitleToVtt(text,label);const blob=new Blob([text],{type:'text/vtt'}),url=URL.createObjectURL(blob);const track=document.createElement('track');track.kind='subtitles';track.label=label||'Subtitles';track.srclang=(label||'en').slice(0,2).toLowerCase();track.src=url;track.default=false;v.appendChild(track);
+    const list=Array.from(v.textTracks),tt=list[list.length-1];subtitleTracks.push({label:track.label,track:tt});tt.addEventListener('cuechange',()=>renderNativeCue(tt));refreshSubtitleTracks();setSubtitle(subtitleTracks.length-1);
+  }
+  async function addVttUrl(url,label){if(!/^https?:/i.test(url)){toast('Enter a valid subtitle URL');return;}try{const r=await fetch(url);if(!r.ok)throw new Error('HTTP '+r.status);addVttText(await r.text(),label||decodeURIComponent(new URL(url).pathname.split('/').pop()||'Subtitles'));}catch(e){toast('Subtitle URL failed: check CORS and URL');}}
   function renderNativeCue(tt){if(activeSubtitle<0||tt.mode!=='showing'){if(activeSubtitle<0)$('subtitleBadge').textContent='';return;}const cues=tt.activeCues;if(!cues||!cues.length){$('subtitleBadge').textContent='';return;}$('subtitleBadge').textContent=Array.from(cues).map(c=>c.text.replace(/<[^>]+>/g,'')).join(' ');}
   function refreshChapters(){const box=$('chaptersList');box.innerHTML='';chapterCues=[];for(const tt of Array.from(v.textTracks)){if(tt.kind==='chapters'){chapterCues=Array.from(tt.cues||[]);break;}}if(!chapterCues.length){$('chaptersNote').textContent='No chapter track detected.';return;}$('chaptersNote').textContent='';chapterCues.forEach((c,i)=>{const b=document.createElement('button');b.className='menu-choice';b.textContent=c.text||('Chapter '+(i+1));b.onclick=()=>{v.currentTime=c.start;v.play().catch(()=>{});closePanels();};box.appendChild(b);});}
   function togglePanel(id){const hidden=$(id).classList.contains('hidden');closePanels(hidden?id:null);$(id).classList.toggle('hidden',!hidden);wake();}
@@ -389,11 +399,11 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
     failBox.classList.remove('hidden'); failBox.innerHTML='<b>Converting video…</b><div id="convertProgress">Loading converter…</div><div class="panel-note">Unsupported containers/codecs are converted locally in your browser to H.264/AAC MP4. Large files may use a lot of RAM.</div>';
     try{
       const engine=await ensureFFmpeg();
-      const response=await fetch(proxyUrl(source),{headers:{Accept:'video/*,*/*'}});
+      const response=await fetch(localPlayback?source:proxyUrl(source),{headers:{Accept:'video/*,*/*'}});
       if(!response.ok) throw new Error('Could not download the source through the player proxy ('+response.status+').');
       const data=new Uint8Array(await response.arrayBuffer());
       if(data.byteLength>1200*1024*1024) throw new Error('This file is over 1.2 GB; browser conversion is not practical.');
-      const ext=inputExt(source), input='input.'+ext, output='aiku-output.mp4';
+      const ext=localPlayback?((document.getElementById('localFile')?.files?.[0]?.name||'input.mkv').match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase()||'mkv'):inputExt(source), input='input.'+ext, output='aiku-output.mp4';
       await engine.writeFile(input,data);
       $('convertProgress').textContent='0% — transcoding…';
       await engine.exec(['-i',input,'-map','0:v:0?','-map','0:a:0?','-c:v','libx264','-preset','ultrafast','-crf','23','-c:a','aac','-b:a','128k','-movflags','+faststart',output]);
@@ -509,7 +519,7 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
   $('audioBtn').onclick=()=>{refreshAudioTracks();togglePanel('audioPanel');};
   $('chaptersBtn').onclick=()=>{refreshChapters();togglePanel('chaptersPanel');};
   $('subFileBtn').onclick=()=>$('subFile').click();
-  $('subFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;addVttText(await f.text(),f.name.replace(/\.vtt$/i,'')||'Subtitles');e.target.value='';};
+  $('subFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;addVttText(await f.text(),f.name.replace(/\.(vtt|srt|ass|ssa)$/i,'')||'Subtitles');e.target.value='';};
   $('subUrlBtn').onclick=()=>{const u=$('subUrl').value.trim();if(u){addVttUrl(u);$('subUrl').value='';}};
   $('lockBtn').onclick=()=>{locked=!locked;P.classList.toggle('locked',locked);toast(locked?'Controls locked':'Controls unlocked');};
   $('lock-indicator')?.addEventListener('click',()=>{locked=false;P.classList.remove('locked');});
@@ -537,7 +547,9 @@ video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
     fail('Can’t play this video',msg);
   });
   v.addEventListener('ended',()=>{try{localStorage.removeItem(key);}catch{}P.classList.remove('playing');setIcons();});
-  v.addEventListener('loadedmetadata',()=>{try{const t=Number(localStorage.getItem(key));if(t>5&&Number.isFinite(v.duration)&&t<v.duration-10){v.currentTime=t;toast('Resumed at '+fmt(t));}}catch{} refreshChapters();refreshSubtitleTracks();paint();});
+  v.addEventListener('loadedmetadata',()=>{try{const t=Number(localStorage.getItem(key));if(t>5&&Number.isFinite(v.duration)&&t<v.duration-10){v.currentTime=t;toast('Resumed at '+fmt(t));}}catch{} refreshChapters();refreshSubtitleTracks();refreshAudioTracks();paint();});
+  v.addEventListener('error',()=>{if(v.error && !localPlayback && !proxyTried && source && !/\.m3u8(?:$|[?#])/i.test(source)){tryProxy();return;} if(v.error && !converting){const codes={1:'Playback was interrupted.',2:'Network error while loading media. Check the URL, CORS, or server availability.',3:'This browser cannot decode this video/audio codec. Try Convert unsupported format.',4:'Unsupported media type or invalid media URL.'}; fail('Media playback error',codes[v.error.code]||'The media could not be played.');}});
+  v.addEventListener('canplay',()=>{setLoading(false);$('fail').classList.add('hidden');});
   setInterval(()=>{if(source&&!v.paused&&v.currentTime>5){try{localStorage.setItem(key,String(Math.floor(v.currentTime)));}catch{}}},3000);
 
   function paint(){const d=v.duration||0,t=v.currentTime||0,p=d?Math.max(0,Math.min(100,t/d*100)):0;$('fill').style.width=p+'%';$('knob').style.left=p+'%';$('time').textContent=fmt(t)+' / '+fmt(d);let e=0;try{for(let i=0;i<v.buffered.length;i++)if(v.buffered.start(i)<=t)e=Math.max(e,v.buffered.end(i));}catch{}$('buf').style.width=d?Math.min(100,e/d*100)+'%':'0%';}
